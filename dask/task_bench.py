@@ -43,6 +43,9 @@ if __name__ == "__main__":
                 print('Client waiting for workers (have %s expect %s)' % (num_workers, args.expect_workers), flush=True)
                 import time
                 time.sleep(5)
+    else:
+        from dask.distributed import Client
+        client = Client(processes=False)
 
 def encode_task_graph(graph):
     from task_bench_core import ffi, c

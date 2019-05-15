@@ -25,26 +25,6 @@ import time
 import dask
 import numpy as np
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-scheduler', required=False)
-    parser.add_argument('-expect-workers', type=int, default=0)
-    args, unknown = parser.parse_known_args()
-
-    if args.scheduler:
-        from dask.distributed import Client
-        client = Client(args.scheduler)
-        if args.expect_workers > 0:
-            while True:
-                num_workers = len(client.ncores())
-                if num_workers >= args.expect_workers:
-                    break
-                print('Client waiting for workers (have %s expect %s)' % (num_workers, args.expect_workers), flush=True)
-                import time
-                time.sleep(5)
-    else:
-        client = None
 
 def encode_task_graph(graph):
     from task_bench_core import ffi, c
@@ -142,7 +122,7 @@ def execute_task_graph(graph, computations, next_tid):
     scratch = [None for _ in range(graph.max_width)]
     if graph.scratch_bytes_per_task > 0:
         for point in range(graph.max_width):
-            scratch[point] = 'task_%s' % next_tid
+            scratch[point] = 'task-%s' % next_tid
             next_tid += 1
             computations[scratch[point]] = (init_scratch, graph.scratch_bytes_per_task)
 
@@ -160,15 +140,16 @@ def execute_task_graph(graph, computations, next_tid):
             for dep in task_graph_dependencies(graph, timestep, point):
                 inputs.append(last_row[dep])
 
-            result = 'task_%s' % next_tid
+            result = 'task-%s' % next_tid
             next_tid += 1
 
             computations[result] = (execute_point, graph_array, timestep, point, scratch[point], *inputs)
+            task = (execute_point, graph_array, timestep, point, scratch[point], *inputs)
 
             if scratch[point] is not None:
-                output = 'task_%s' % next_tid
+                output = 'task-%s' % next_tid
                 next_tid += 1
-                scratch[point] = 'task_%s' % next_tid
+                scratch[point] = 'task-%s' % next_tid
                 next_tid += 1
 
                 computations[output] = (splitter, result, 0)
@@ -183,27 +164,3 @@ def execute_task_graph(graph, computations, next_tid):
         assert(len(row) == graph.max_width)
         last_row = row
     return outputs, next_tid
-
-
-def execute_task_bench():
-    from task_bench_core import ffi, c
-
-    app = app_create(sys.argv)
-    task_graphs = app_task_graphs(app)
-    start_time = time.perf_counter()
-    computations = {}
-    next_tid = 0
-    results = []
-    for task_graph in task_graphs:
-        result, next_tid = execute_task_graph(task_graph, computations, next_tid)
-        results.extend(result)
-    if client:
-        client.get(computations, results)
-    else:
-        dask.get(computations, results)
-    total_time = time.perf_counter() - start_time
-    c.app_report_timing(app, total_time)
-
-
-if __name__ == "__main__":
-    execute_task_bench()
